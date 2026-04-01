@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pixel Zombies: Apex Survivor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; color: #fff; font-family: 'Press Start 2P', cursive; }
+        #game-container { width: 100vw; height: 100vh; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <script>
+        // ==========================================
+        // SCENE 1: THE MAIN MENU
+        // ==========================================
+        class MainMenu extends Phaser.Scene {
+            constructor() { super({ key: 'MainMenu' }); }
+            
+            preload() {
+                this.load.image('bg', '/static/bg.jpg'); 
+                this.load.image('zombie_img', '/static/Enemy.png'); 
+                this.load.image('player_img', '/static/player.png'); 
+                this.load.audio('bgm', '/static/The_Final_Watch.mp3'); 
+            }
+            
+            create() {
+                let w = this.cameras.main.width; let h = this.cameras.main.height;
+                this.bg_sprite = this.add.tileSprite(w/2, h/2, w, h, 'bg');
+                this.add.rectangle(w/2, h/2, w, h, 0x000000, 0.5); 
+
+                // Start Music Logic: Check if it's already playing (to avoid double layers on restart)
+                if (!this.sound.get('bgm')) {
+                    let music = this.sound.add('bgm', { volume: 0.4, loop: true });
+                    
+                    // Browsers block audio until interaction. We listen for a click or keypress to unlock it!
+                    this.input.once('pointerdown', () => { if (!music.isPlaying) music.play(); });
+                    this.input.keyboard.once('keydown', () => { if (!music.isPlaying) music.play(); });
+                }
+
+                let leftPlayer = this.add.image(w * 0.15, h * 0.5, 'player_img').setScale(1.5).setAngle(90);
+                let rightZombie = this.add.image(w * 0.85, h * 0.5, 'zombie_img').setScale(1.5).setAngle(180);
+
+                this.tweens.add({ targets: leftPlayer, y: '-=15', duration: 3000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+                this.tweens.add({ targets: rightZombie, y: '+=15', duration: 3000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+                this.add.text(w/2, h/2 - 100, 'pixel', { fontFamily: '"Press Start 2P"', fontSize: '24px', fill: '#ffffff' }).setOrigin(0.5);
+                this.add.text(w/2, h/2 - 40, 'ZOMBIES', { 
+                    fontFamily: '"Press Start 2P"', fontSize: '70px', fill: '#e52b50', stroke: '#ffffff', strokeThickness: 8,
+                    shadow: { offsetX: 6, offsetY: 6, color: '#000', fill: true }
+                }).setOrigin(0.5);
+                
+                this.add.text(w/2, h/2 + 60, 'ARROWS: Up / Down', { fontFamily: '"Press Start 2P"', fontSize: '14px', fill: '#ffcc00' }).setOrigin(0.5);
+                this.add.text(w/2, h/2 + 85, 'SPACE: Shoot', { fontFamily: '"Press Start 2P"', fontSize: '14px', fill: '#ffcc00' }).setOrigin(0.5);
+
+                let startBtn = this.add.text(w/2, h/2 + 140, 'PRESS SPACE TO START', { fontFamily: '"Press Start 2P"', fontSize: '20px', fill: '#00ffcc' }).setOrigin(0.5);
+
+                this.input.keyboard.once('keydown-SPACE', () => { this.scene.start('PlayGame'); });
+                this.tweens.add({ targets: startBtn, alpha: 0.2, duration: 800, yoyo: true, repeat: -1 });
+            }
+            
+            update() { this.bg_sprite.tilePositionY -= 0.5; } 
+        }
+
+        // ==========================================
+        // SCENE 2: THE ACTUAL GAME 
+        // ==========================================
+        class PlayGame extends Phaser.Scene {
+            constructor() { super({ key: 'PlayGame' }); }
+
+            player; cursors; spaceBar; bullets; zombies; 
+            lastFired = 0; points = 0; health = 100; highScore = 0;
+            pointsText; highScoreText; healthBar; floorTile;
+
+            preload() {
+                this.load.image('bg', '/static/bg.jpg'); 
+                this.load.image('player_img', '/static/player.png'); 
+                this.load.image('zombie_img', '/static/Enemy.png'); 
+                this.load.image('bullet_img', '/static/player_bullet.png'); 
+                this.load.audio('shoot_snd', '/static/shoot.ogg');
+            }
+
+            create() {
+                let w = this.cameras.main.width; let h = this.cameras.main.height;
+                this.points = 0; this.health = 100; 
+
+                this.highScore = localStorage.getItem('pixelZombiesHS') || 0;
+
+                this.floorTile = this.add.tileSprite(w/2, h/2, w, h, 'bg');
+                
+                this.bullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, runChildUpdate: true });
+                this.zombies = this.physics.add.group();
+
+                this.player = this.physics.add.sprite(150, h/2, 'player_img');
+                this.player.setCollideWorldBounds(true);
+                this.player.setAngle(90); 
+                this.player.setImmovable(true); 
+                this.player.setScrollFactor(0); 
+                this.player.isHurt = false; 
+
+                this.player.body.setSize(this.player.width * 0.7, this.player.height * 0.7);
+
+                this.cursors = this.input.keyboard.createCursorKeys(); 
+                this.spaceBar = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+                this.time.addEvent({ delay: 700, callback: this.spawnZombie, callbackScope: this, loop: true });
+
+                this.pointsText = this.add.text(20, 20, 'POINTS: 0', { fontFamily: '"Press Start 2P"', fontSize: '20px', fill: '#00ffcc', stroke: '#000', strokeThickness: 4 }).setScrollFactor(0);
+                this.highScoreText = this.add.text(w - 20, 20, 'HIGH SCORE: ' + this.highScore, { fontFamily: '"Press Start 2P"', fontSize: '20px', fill: '#ffcc00', stroke: '#000', strokeThickness: 4 }).setOrigin(1, 0).setScrollFactor(0);
+
+                this.add.text(20, 52, 'HP:', { fontFamily: '"Press Start 2P"', fontSize: '16px', fill: '#ff0000', stroke: '#000', strokeThickness: 4 }).setScrollFactor(0);
+                this.add.rectangle(80, 50, 150, 18, 0x333333).setOrigin(0, 0).setStrokeStyle(4, 0x000000).setScrollFactor(0); 
+                this.healthBar = this.add.rectangle(80, 50, 150, 18, 0xe52b50).setOrigin(0, 0).setScrollFactor(0); 
+
+                this.physics.add.overlap(this.bullets, this.zombies, this.hitZombie, null, this);
+                this.physics.add.overlap(this.player, this.zombies, this.playerHit, null, this);
+            }
+
+            update(time) {
+                this.player.setVelocity(0);
+                if (this.cursors.up.isDown) { this.player.setVelocityY(-350); }
+                else if (this.cursors.down.isDown) { this.player.setVelocityY(350); }
+
+                this.player.x = 150; 
+                this.player.setAngle(90); 
+
+                if (this.spaceBar.isDown && time > this.lastFired) {
+                    let bullet = this.bullets.get();
+                    if (bullet) {
+                        bullet.setTexture('bullet_img'); 
+                        bullet.setActive(true).setVisible(true);
+                        
+                        let barrelX = this.player.x + 35; 
+                        let barrelY = this.player.y + 8; 
+                        bullet.setPosition(barrelX, barrelY);
+                        
+                        bullet.setAngle(90); 
+                        bullet.setVelocityX(1200);
+                        bullet.setVelocityY(0);
+
+                        this.lastFired = time + 150; 
+                        if (this.cache.audio.exists('shoot_snd')) this.sound.play('shoot_snd', { volume: 0.2 });
+                    }
+                }
+
+                this.bullets.children.iterate((bullet) => {
+                    if (bullet && bullet.x > this.cameras.main.width + 50) { bullet.destroy(); }
+                });
+
+                this.zombies.children.iterate((zombie) => {
+                    if (zombie && zombie.x < -50) { zombie.destroy(); }
+                });
+            }
+
+            spawnZombie() {
+                let w = this.cameras.main.width; let h = this.cameras.main.height;
+                let x = w + 50; 
+                let y = Phaser.Math.Between(130, h - 130); 
+                
+                let zombie = this.zombies.create(x, y, 'zombie_img');
+                zombie.setAngle(180); 
+                
+                let speed = Phaser.Math.Between(250, 400);
+                zombie.setVelocityX(-speed);
+                zombie.setVelocityY(0);
+            }
+
+            hitZombie(bullet, zombie) {
+                bullet.destroy(); zombie.destroy(); 
+                
+                this.points += 10;
+                this.pointsText.setText('POINTS: ' + this.points);
+                
+                if (this.points > this.highScore) {
+                    this.highScore = this.points;
+                    this.highScoreText.setText('HIGH SCORE: ' + this.highScore);
+                }
+            }
+
+            playerHit(player, zombie) {
+                if (!this.player.isHurt) {
+                    this.health -= 5; 
+                    
+                    let newWidth = (this.health / 100) * 150; 
+                    this.healthBar.width = Math.max(0, newWidth); 
+
+                    this.player.isHurt = true;
+                    player.setTint(0xff0000); 
+
+                    this.cameras.main.shake(350, 0.04); 
+
+                    this.time.delayedCall(1500, () => {
+                        player.clearTint();
+                        this.player.isHurt = false;
+                    });
+
+                    if (this.health <= 0) {
+                        localStorage.setItem('pixelZombiesHS', this.highScore);
+                        this.scene.start('GameOver', { points: this.points });
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // SCENE 3: GAME OVER 
+        // ==========================================
+        class GameOver extends Phaser.Scene {
+            constructor() { super({ key: 'GameOver' }); }
+            init(data) { this.finalPoints = data.points; }
+
+            create() {
+                let w = this.cameras.main.width; let h = this.cameras.main.height;
+                this.add.rectangle(0, 0, w, h, 0x330000).setOrigin(0, 0);
+
+                this.add.text(w/2, h/2 - 80, 'YOU DIED', { fontFamily: '"Press Start 2P"', fontSize: '60px', fill: '#ff0000', stroke: '#ffffff', strokeThickness: 6 }).setOrigin(0.5);
+                this.add.text(w/2, h/2, 'FINAL POINTS: ' + this.finalPoints, { fontFamily: '"Press Start 2P"', fontSize: '20px', fill: '#ffcc00' }).setOrigin(0.5);
+                
+                let restartBtn = this.add.text(w/2, h/2 + 80, '[PRESS 1] RESTART GAME', { fontFamily: '"Press Start 2P"', fontSize: '16px', fill: '#ffffff' }).setOrigin(0.5);
+                let homeBtn = this.add.text(w/2, h/2 + 120, '[PRESS 2] MAIN MENU', { fontFamily: '"Press Start 2P"', fontSize: '16px', fill: '#00ffcc' }).setOrigin(0.5);
+
+                this.tweens.add({ targets: restartBtn, alpha: 0.5, duration: 800, yoyo: true, repeat: -1 });
+
+                this.time.delayedCall(500, () => {
+                    this.input.keyboard.once('keydown-ONE', () => { this.scene.start('PlayGame'); });
+                    this.input.keyboard.once('keydown-TWO', () => { this.scene.start('MainMenu'); });
+                });
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            scale: { mode: Phaser.Scale.RESIZE, parent: 'game-container', width: '100%', height: '100%' },
+            physics: { default: 'arcade', arcade: { debug: false } },
+            scene: [MainMenu, PlayGame, GameOver] 
+        };
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>
