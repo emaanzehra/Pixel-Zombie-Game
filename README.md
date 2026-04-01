@@ -34,9 +34,9 @@ Every zombie killed awards **10 Points**. You can sustain up to 20 hits (5% dama
 ## 📸 Screenshots
 
 *(Add your screenshots here!)*
-* `![Main Menu](path/to/menu-screenshot.jpg)`
-* `![Gameplay](path/to/gameplay-screenshot.jpg)`
-* `![Game Over](path/to/gameover-screenshot.jpg)`
+* `![Main Menu](main_menu.png)`
+* `![Gameplay](game_play.png)`
+* `![Game Over](game_over.png)`
 
 ---
 
